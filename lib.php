@@ -16,7 +16,7 @@ function json_out($data, $code = 200)
  * Panggil REST API Supabase (PostgREST).
  * Mengembalikan array: ok, code, data, error.
  */
-function supabase($method, $path, $body = null)
+function supabase($method, $path, $body = null, $timeout = 15)
 {
     $url = rtrim(SUPABASE_URL, '/') . '/rest/v1/' . ltrim($path, '/');
 
@@ -36,8 +36,8 @@ function supabase($method, $path, $body = null)
         CURLOPT_CUSTOMREQUEST  => $method,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER     => $headers,
-        CURLOPT_CONNECTTIMEOUT => 8,
-        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_CONNECTTIMEOUT => min(6, $timeout),
+        CURLOPT_TIMEOUT        => $timeout,
     ));
     if ($body !== null) {
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
@@ -63,7 +63,174 @@ function simpan_berat($berat_kg, $sumber)
     return supabase('POST', 'timbangan', array(
         'berat_kg' => round($berat_kg, 3),
         'sumber'   => $sumber,
-    ));
+    ), 8);
+}
+
+/* ================================================================
+ *  DATA LIVE (di server) dan PENYIMPANAN PER MENIT (ke Supabase)
+ *
+ *  Angka yang tampil di dashboard (live) disimpan di file kecil data/state.php,
+ *  jadi bisa diperbarui tiap beberapa detik tanpa menyentuh Supabase.
+ *  Supabase hanya diisi sekali tiap INTERVAL_SIMPAN_DETIK.
+ * ================================================================ */
+
+/** Folder data sementara. Dibuat otomatis. Mengembalikan null bila tidak bisa ditulis. */
+function folder_data()
+{
+    static $dir = false;
+    if ($dir !== false) return $dir;
+
+    $kandidat = array(
+        __DIR__ . '/data',
+        rtrim(sys_get_temp_dir(), '/\\') . '/cornicrez-data',
+    );
+    foreach ($kandidat as $i => $d) {
+        if (!is_dir($d)) {
+            @mkdir($d, 0755, true);
+            if ($i === 0 && is_dir($d)) {
+                // Larang akses langsung lewat browser (file state.php juga sudah aman sendiri).
+                @file_put_contents($d . '/.htaccess',
+                    "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n" .
+                    "<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n");
+            }
+        }
+        if (is_dir($d) && is_writable($d)) return $dir = $d;
+    }
+    return $dir = null;
+}
+
+function state_kosong()
+{
+    return array(
+        'live'      => null,   // pembacaan terakhir: berat_kg, sumber, waktu
+        'jendela'   => null,   // pembacaan yang sedang dikumpulkan untuk disimpan per menit
+        'simpan'    => null,   // penyimpanan Supabase terakhir yang berhasil: waktu, berat_kg
+        'gagal'     => null,   // kegagalan simpan terakhir: waktu, pesan
+        'ulang'     => 0,      // jangan coba simpan lagi sebelum waktu ini (setelah gagal)
+        'pemakaian' => null,   // perkiraan pemakaian per hari (di-cache): nilai, waktu
+    );
+}
+
+/** Baca state (tanpa lock; file selalu ditulis utuh lewat rename). */
+function state_baca()
+{
+    $dir = folder_data();
+    if ($dir === null || !is_file($dir . '/state.php')) return state_kosong();
+
+    for ($i = 0; $i < 2; $i++) {
+        $raw = @file_get_contents($dir . '/state.php');
+        if ($raw !== false) {
+            $nl = strpos($raw, "\n");           // baris pertama = pengaman (php exit), data JSON ada sesudahnya
+            $j  = $nl === false ? null : json_decode(substr($raw, $nl + 1), true);
+            if (is_array($j)) return array_merge(state_kosong(), $j);
+            break;
+        }
+        usleep(50000);
+    }
+    return state_kosong();
+}
+
+/** Tulis state secara atomik. */
+function state_tulis($st)
+{
+    $dir = folder_data();
+    if ($dir === null) return false;
+    $f   = $dir . '/state.php';
+    $tmp = $f . '.' . getmypid() . '.tmp';
+    $ok  = @file_put_contents($tmp, "<?php exit; ?>\n" . json_encode($st)) !== false;
+    if ($ok) $ok = @rename($tmp, $f);
+    if (!$ok) @unlink($tmp);
+    return $ok;
+}
+
+/** Hitung ulang perkiraan pemakaian per hari bila cache-nya sudah lebih dari 10 menit. */
+function segarkan_pemakaian(&$st, $sekarang)
+{
+    if (is_array($st['pemakaian']) && $sekarang - $st['pemakaian']['waktu'] < 600) return;
+
+    $sejak = gmdate('Y-m-d\TH:i:s\Z', $sekarang - 7 * 86400);
+    $pj = supabase('GET', 'timbangan_per_jam?select=jam,berat_kg&order=jam.asc&limit=200&jam=gte.' . rawurlencode($sejak), null, 6);
+    $nilai = ($pj['ok'] && is_array($pj['data'])) ? pemakaian_per_hari($pj['data']) : PEMAKAIAN_DEFAULT_KG_HARI;
+    $st['pemakaian'] = array('nilai' => $nilai, 'waktu' => $sekarang);
+}
+
+/**
+ * Terima satu pembacaan berat.
+ *  - Angka live SELALU diperbarui (disimpan di file server, bukan di Supabase).
+ *  - ESP32: pembacaan dikumpulkan; rata-ratanya disimpan ke Supabase sekali tiap
+ *    INTERVAL_SIMPAN_DETIK. Simulasi: nilai terakhir yang disimpan (supaya grafik contoh tetap bervariasi).
+ *  - Manual: dilakukan dengan sengaja oleh pengguna, jadi langsung disimpan.
+ * Mengembalikan: ok (bool), tersimpan (bool), error (string|null), peringatan (string|null).
+ */
+function catat_berat($kg, $sumber)
+{
+    $dir = folder_data();
+    if ($dir === null) {
+        return array('ok' => false, 'tersimpan' => false, 'peringatan' => null,
+            'error' => 'Folder "data" tidak bisa ditulis. Buat folder bernama data di samping index.php dan beri izin tulis (chmod 755 atau 775).');
+    }
+    $lock = @fopen($dir . '/state.lock', 'c');
+    if (!$lock) {
+        return array('ok' => false, 'tersimpan' => false, 'peringatan' => null,
+                     'error' => 'Gagal membuka file kunci di folder data.');
+    }
+    flock($lock, LOCK_EX);          // satu permintaan sekali jalan, supaya hitungan tidak bentrok
+
+    $now = time();
+    $st  = state_baca();
+    $kg  = round($kg, 3);
+    $st['live'] = array('berat_kg' => $kg, 'sumber' => $sumber, 'waktu' => $now);
+
+    $tersimpan  = false;
+    $peringatan = null;
+    $simpanNilai = null;
+
+    if ($sumber === 'manual') {
+        $simpanNilai = $kg;
+    } else {
+        $j = $st['jendela'];
+        // Mulai jendela baru bila belum ada, sumbernya berbeda, atau ada jeda panjang (alat sempat mati).
+        if (!is_array($j) || $j['sumber'] !== $sumber || $now - $j['akhir'] > INTERVAL_SIMPAN_DETIK) {
+            $j = array('sumber' => $sumber, 'mulai' => $now, 'akhir' => $now, 'n' => 0, 'jumlah' => 0.0);
+        }
+        $j['n']++;
+        $j['jumlah'] += $kg;
+        $j['akhir']   = $now;
+
+        if ($now - $j['mulai'] >= INTERVAL_SIMPAN_DETIK && $now >= $st['ulang']) {
+            $simpanNilai = ($sumber === 'simulasi') ? $kg : $j['jumlah'] / $j['n'];
+        }
+        $st['jendela'] = $j;
+    }
+
+    if ($simpanNilai !== null) {
+        $r = simpan_berat($simpanNilai, $sumber);
+        if ($r['ok']) {
+            $tersimpan = true;
+            $st['simpan'] = array('waktu' => $now, 'berat_kg' => round($simpanNilai, 3));
+            $st['gagal']  = null;
+            $st['ulang']  = 0;
+            if ($sumber !== 'manual') {   // mulai jendela berikutnya dari sekarang
+                $st['jendela'] = array('sumber' => $sumber, 'mulai' => $now, 'akhir' => $now, 'n' => 0, 'jumlah' => 0.0);
+            }
+            segarkan_pemakaian($st, $now);
+        } else {
+            error_log('CORNICREZ simpan ke Supabase gagal: ' . $r['error']);
+            $peringatan = 'Gagal menyimpan ke Supabase (HTTP ' . $r['code'] . '). Periksa SUPABASE_URL dan SUPABASE_KEY di config.';
+            $st['gagal'] = array('waktu' => $now, 'pesan' => $peringatan);
+            $st['ulang'] = $now + 15;     // beri jeda sebelum mencoba lagi
+        }
+    }
+
+    $ok = state_tulis($st);
+    flock($lock, LOCK_UN);
+    fclose($lock);
+
+    if (!$ok) {
+        return array('ok' => false, 'tersimpan' => $tersimpan, 'peringatan' => $peringatan,
+                     'error' => 'Gagal menulis data sementara di folder data.');
+    }
+    return array('ok' => true, 'tersimpan' => $tersimpan, 'peringatan' => $peringatan, 'error' => null);
 }
 
 /** Validasi angka berat. Mengembalikan float (kg) atau null jika tidak valid. */

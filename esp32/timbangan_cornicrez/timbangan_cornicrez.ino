@@ -18,10 +18,12 @@ const char *WIFI_PASS  = "PASSWORD_WIFI";
 // Alamat file api/simpan.php di hosting-mu
 const char *URL_SIMPAN = "https://domainmu.com/cornicrez/api/simpan.php";
 
-// Harus SAMA dengan API_KEY_ESP32 di config.php (huruf dan angka saja)
+// Harus SAMA dengan API_KEY_ESP32 di config.local.php (huruf dan angka saja)
 const char *API_KEY    = "ganti-dengan-kata-sandi-panjang";
 
-const unsigned long INTERVAL_KIRIM_MS = 5000;   // kirim ke website tiap 5 detik
+// Kirim ke website tiap 3 detik supaya angka di dashboard live.
+// Website sendiri yang menyimpan ke database hanya sekali tiap 1 menit (diatur di config.php).
+const unsigned long INTERVAL_KIRIM_MS = 3000;
 float calibrationFactor = 420.0;                // ganti dengan hasil kalibrasi (perintah k)
 // ===================================================
 
@@ -103,8 +105,9 @@ void kirimKeWebsite(float beratGram) {
   Serial.print("Kirim ke website: ");
   if (kode > 0) {
     Serial.print("HTTP ");
-    Serial.println(kode);
-    if (kode != 200) Serial.println(http.getString());   // tampilkan pesan error dari server
+    Serial.print(kode);
+    Serial.print(" ");
+    Serial.println(http.getString());   // jawaban server, mis. {"ok":true,"tersimpan":false}
   } else {
     Serial.println(HTTPClient::errorToString(kode));
   }

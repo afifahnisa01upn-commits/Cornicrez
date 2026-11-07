@@ -101,6 +101,15 @@ section{scroll-margin-top:16px}
 .msg.kritis{background:#fde4e2;border-left-color:var(--bad);color:#a8231a}
 .msg.kosong{background:#eef1ef;border-left-color:#9aa7a0;color:#6b7a70}
 .sub{margin-top:14px;color:var(--muted)}
+.live-info{display:flex;align-items:flex-start;gap:8px;margin-top:16px;font-size:13px;color:var(--muted);line-height:1.4}
+.live-dot{flex:none;margin-top:5px;width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(46,156,79,.5)}
+.live-dot.on{animation:denyut 2s infinite}
+.live-dot.off{background:var(--bad)}
+.live-dot.kosong{background:#b8c2bb}
+@keyframes denyut{0%{box-shadow:0 0 0 0 rgba(46,156,79,.5)}70%{box-shadow:0 0 0 8px rgba(46,156,79,0)}100%{box-shadow:0 0 0 0 rgba(46,156,79,0)}}
+@media (prefers-reduced-motion:reduce){.live-dot.on{animation:none}}
+.hint{margin:-6px 0 14px;font-size:13px;color:var(--muted)}
+.hint-inline{font-size:13px;font-weight:600;color:var(--muted)}
 
 .input-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px}
 .field label{display:block;font-size:13px;color:#59675e;font-weight:600;margin-bottom:6px}

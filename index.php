@@ -72,6 +72,7 @@
         <div class="bar-head"><span>Kapasitas Penyimpanan</span><span id="persen">0%</span></div>
         <div class="bar" id="bar"><i id="barIsi"></i></div>
         <div class="bar-foot"><span>0 kg</span><span><?= (float) KAPASITAS_KG ?> kg</span></div>
+        <p class="live-info" id="infoLive"><span class="live-dot kosong"></span><span id="infoLiveTeks">Menunggu data…</span></p>
       </div>
 
       <div class="card">
@@ -122,6 +123,7 @@
   <section id="riwayat">
     <div class="card">
       <h2>📈 Riwayat Berat Stok</h2>
+      <p class="hint" id="infoRiwayat">Data tersimpan di database.</p>
       <div class="chart-wrap" id="chart"><div class="empty">Memuat grafik…</div></div>
     </div>
 
@@ -131,7 +133,7 @@
     </div>
 
     <div class="card">
-      <h2>🗒️ Data Terakhir</h2>
+      <h2>🗒️ Data Terakhir <small class="hint-inline">(tersimpan di database)</small></h2>
       <div class="table-wrap">
         <table class="tbl">
           <thead><tr><th>Waktu</th><th>Berat</th><th>Status</th><th>Sumber</th></tr></thead>
@@ -149,7 +151,8 @@ window.CFG = <?= json_encode(array(
     'kapasitas' => KAPASITAS_KG,
     'safety'    => SAFETY_STOCK_KG,
     'rop'       => ROP_KG,
-    'refreshMs' => 3000,
+    'refreshMs' => 3000,                          // angka live diperbarui tiap 3 detik
+    'intervalSimpan' => INTERVAL_SIMPAN_DETIK,    // database diisi sekali tiap N detik
 )) ?>;
 </script>
 <script src="assets/app.js"></script>

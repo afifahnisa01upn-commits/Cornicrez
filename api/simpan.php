@@ -1,5 +1,6 @@
 <?php
-// Dipanggil oleh ESP32: POST form "key" dan "berat" (dalam kg).
+// Dipanggil oleh ESP32 (tiap beberapa detik): POST form "key" dan "berat" (dalam kg).
+// Angka langsung tampil live di dashboard; ke Supabase hanya disimpan sekali per menit (lihat lib.php).
 requi[REDACTED] __DIR__ . '/../lib.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -16,9 +17,10 @@ if ($berat === null) {
     json_out(array('ok' => false, 'error' => 'Nilai berat tidak valid'), 400);
 }
 
-$r = simpan_berat($berat, 'esp32');
-if (!$r['ok']) {
-    json_out(array('ok' => false, 'error' => 'Gagal menyimpan ke Supabase',
-                   'detail' => $r['error']), 502);
+$h = catat_berat($berat, 'esp32');
+if (!$h['ok']) {
+    json_out(array('ok' => false, 'error' => $h['error']), 500);
 }
-json_out(array('ok' => true, 'berat_kg' => $berat));
+$out = array('ok' => true, 'berat_kg' => $berat, 'tersimpan' => $h['tersimpan']);
+if ($h['peringatan'] !== null) $out['peringatan'] = $h['peringatan'];
+json_out($out);

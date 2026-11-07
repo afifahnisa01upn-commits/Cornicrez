@@ -33,13 +33,41 @@
   /* ------------------------------------------------------------ */
   /*  Tampilan                                                    */
   /* ------------------------------------------------------------ */
-  function tampilkanError(pesan) {
+  // Pesan error dari beberapa sumber digabung: yang pertama berisi yang ditampilkan.
+  var galat = { live: '', riwayat: '', simpan: '' };
+  function setGalat(sumber, pesan) {
+    galat[sumber] = pesan || '';
+    var teks = galat.live || galat.riwayat || galat.simpan;
     var el = $('alert');
-    el.hidden = !pesan;
-    el.textContent = pesan || '';
+    el.hidden = !teks;
+    el.textContent = teks;
   }
 
-  function render(d) {
+  // 60 -> "1 menit", 90 -> "90 detik"
+  function teksInterval(detik) {
+    return detik % 60 === 0 ? (detik / 60) + ' menit' : detik + ' detik';
+  }
+
+  // Keterangan di bawah angka berat: status live + kapan terakhir tersimpan ke database
+  function infoLive(d) {
+    var dot = document.querySelector('#infoLive .live-dot');
+    var teks = $('infoLiveTeks');
+    if (!d.terbaru) {
+      dot.className = 'live-dot kosong';
+      teks.textContent = 'Menunggu data dari timbangan…';
+      return;
+    }
+    var hidup = d.sistem.kode === 'online' || d.sistem.kode === 'simulasi';
+    var t = d.sistem.kode === 'manual' ? 'Input manual ' + jam(d.terbaru.waktu)
+          : hidup ? 'Live · data masuk ' + jam(d.terbaru.waktu)
+          : 'Terputus · data terakhir ' + jam(d.terbaru.waktu);
+    t += ' · disimpan ke database tiap ' + teksInterval(CFG.intervalSimpan);
+    if (d.simpan && d.simpan.terakhir) t += ' (terakhir ' + jam(new Date(d.simpan.terakhir * 1000).toISOString()) + ')';
+    dot.className = 'live-dot ' + (hidup ? 'on' : (d.sistem.kode === 'manual' ? 'kosong' : 'off'));
+    teks.textContent = t;
+  }
+
+  function renderLive(d) {
     var sys = d.sistem || { kode: 'kosong', label: 'Belum ada data' };
     $('sysVal').className = 'val sys sys-' + sys.kode;
     $('sysVal').textContent = sys.label;
@@ -59,9 +87,8 @@
       $('pesan').textContent = 'Belum ada data dari timbangan.';
       $('detail').textContent = 'Kirim data dari ESP32, atau isi berat manual di bawah.';
       ['rSisa', 'rRop', 'rButuh', 'rHari'].forEach(function (id) { $(id).textContent = '–'; });
-      gambarGrafik([]);
       $('monitoring').textContent = 'Menunggu data…';
-      isiTabel([]);
+      infoLive(d);
       return;
     }
 
@@ -93,9 +120,13 @@
     $('rButuh').textContent = fmt(h.kebutuhan_pengadaan) + ' kg';
     $('rHari').textContent = h.estimasi_hari === null ? '–' : fmt(h.estimasi_hari, 1) + ' hari';
 
-    gambarGrafik(d.riwayat);
     teksMonitoring(d);
-    isiTabel(d.riwayat);
+    infoLive(d);
+  }
+
+  function renderRiwayat(rows) {
+    gambarGrafik(rows);
+    isiTabel(rows);
   }
 
   function teksMonitoring(d) {
@@ -185,7 +216,7 @@
     s += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="#1f7a3d" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>';
 
     // titik data
-    var r0 = n > 20 ? 4 : 5.5;
+    var r0 = n > 40 ? 3 : (n > 20 ? 4 : 5.5);
     rows.forEach(function (r, i) {
       var w = WARNA[kodeStatus(r.berat_kg)];
       s += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(r.berat_kg).toFixed(1) + '" r="' + r0 + '" fill="' + w + '" stroke="#fff" stroke-width="2">' +
@@ -206,12 +237,12 @@
 
   /* ------------------------------------------------------------ */
   /*  Ambil data dari server                                      */
+  /*   - live    : tiap 3 detik, dari file di server (ringan)     */
+  /*   - riwayat : dari Supabase, hanya saat dibuka dan ketika    */
+  /*               ada data baru yang tersimpan (sekali per menit) */
   /* ------------------------------------------------------------ */
-  var sedangMuat = false;
-  function muat() {
-    if (sedangMuat) return;
-    sedangMuat = true;
-    fetch('api/data.php?_=' + Date.now(), { cache: 'no-store' })
+  function ambilJson(url) {
+    return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now(), { cache: 'no-store' })
       .then(function (r) {
         return r.json().catch(function () {
           throw new Error('Respons server bukan JSON. Periksa error PHP di hosting.');
@@ -219,11 +250,47 @@
       })
       .then(function (d) {
         if (!d.ok) throw new Error(d.error || 'Gagal memuat data.');
-        tampilkanError('');
-        render(d);
+        return d;
+      });
+  }
+
+  var sedangMuat = false;
+  var simpanTerakhir;            // penanda: kapan terakhir tersimpan ke database (dari server)
+  var perluRiwayat = true;       // true = grafik/tabel perlu dimuat ulang
+  var riwayatBoleh = 0;          // jeda sebelum mencoba lagi bila gagal
+
+  function muatLive() {
+    if (sedangMuat) return;
+    sedangMuat = true;
+    ambilJson('api/live.php')
+      .then(function (d) {
+        setGalat('live', '');
+        setGalat('simpan', d.simpan && d.simpan.gagal ? d.simpan.gagal : '');
+        renderLive(d);
+        var t = d.simpan ? d.simpan.terakhir : null;
+        if (t !== simpanTerakhir) { simpanTerakhir = t; perluRiwayat = true; }
+        if (perluRiwayat) muatRiwayat();
       })
-      .catch(function (e) { tampilkanError(e.message); })
+      .catch(function (e) { setGalat('live', e.message); })
       .then(function () { sedangMuat = false; });
+  }
+
+  var sedangRiwayat = false;
+  function muatRiwayat() {
+    if (sedangRiwayat || Date.now() < riwayatBoleh) return;
+    sedangRiwayat = true;
+    perluRiwayat = false;        // bila ada data baru selagi memuat, penanda ini menyala lagi
+    ambilJson('api/data.php')
+      .then(function (d) {
+        setGalat('riwayat', '');
+        renderRiwayat(d.riwayat);
+      })
+      .catch(function (e) {
+        setGalat('riwayat', e.message);
+        perluRiwayat = true;
+        riwayatBoleh = Date.now() + 15000;   // coba lagi 15 detik kemudian
+      })
+      .then(function () { sedangRiwayat = false; });
   }
 
   /* ------------------------------------------------------------ */
@@ -254,14 +321,14 @@
     $('btnHitung').disabled = true;
     kirimBerat(v, 'manual').then(function (ok) {
       $('btnHitung').disabled = false;
-      if (ok) { $('inputBerat').value = ''; muat(); }
+      if (ok) { $('inputBerat').value = ''; muatLive(); }
     });
   });
 
   var simTimer = null, simIdx = 0;
   var simUrut = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
   function simTick() {
-    kirimBerat(simUrut[simIdx], 'simulasi').then(function (ok) { if (ok) muat(); });
+    kirimBerat(simUrut[simIdx], 'simulasi').then(function (ok) { if (ok) muatLive(); });
     simIdx = (simIdx + 1) % simUrut.length;
   }
   $('chkSim').addEventListener('change', function () {
@@ -283,6 +350,7 @@
     ['dashboard', 'perhitungan', 'riwayat'].forEach(function (id) { io.observe($(id)); });
   }
 
-  muat();
-  setInterval(muat, CFG.refreshMs);
+  $('infoRiwayat').textContent = 'Data tersimpan di database, satu titik tiap ' + teksInterval(CFG.intervalSimpan) + ' (rata-rata pembacaan selama itu).';
+  muatLive();
+  setInterval(muatLive, CFG.refreshMs);
 })();

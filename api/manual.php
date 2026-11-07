@@ -1,5 +1,6 @@
 <?php
 // Dipanggil dashboard: input berat manual dan data simulasi (JSON).
+// Manual langsung disimpan ke Supabase; simulasi diperlakukan seperti ESP32 (live + simpan per menit).
 requi[REDACTED] __DIR__ . '/../lib.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -18,9 +19,12 @@ if ($berat === null) {
 
 $sumber = (isset($in['sumber']) && $in['sumber'] === 'simulasi') ? 'simulasi' : 'manual';
 
-$r = simpan_berat($berat, $sumber);
-if (!$r['ok']) {
-    error_log('CORNICREZ manual.php: ' . $r['error']);
-    json_out(array('ok' => false, 'error' => 'Gagal menyimpan ke Supabase (HTTP ' . $r['code'] . ')'), 502);
+$h = catat_berat($berat, $sumber);
+if (!$h['ok']) {
+    json_out(array('ok' => false, 'error' => $h['error']), 500);
 }
-json_out(array('ok' => true, 'berat_kg' => $berat, 'sumber' => $sumber));
+if ($h['peringatan'] !== null && $sumber === 'manual') {
+    // Input manual memang harus tersimpan; beri tahu pengguna kalau gagal.
+    json_out(array('ok' => false, 'error' => $h['peringatan']), 502);
+}
+json_out(array('ok' => true, 'berat_kg' => $berat, 'sumber' => $sumber, 'tersimpan' => $h['tersimpan']));
