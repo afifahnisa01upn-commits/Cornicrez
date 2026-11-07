@@ -1,0 +1,6 @@
+.env
+.env.*
+esp32/
+database.sql
+README.txt
+Claude outputs/

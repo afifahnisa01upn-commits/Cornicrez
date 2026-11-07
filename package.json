@@ -1,0 +1,9 @@
+{
+  "name": "cornicrez-inventory-monitoring",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard monitoring persediaan emping jagung (Vercel Functions + Supabase + ESP32)",
+  "engines": {
+    "node": "22.x"
+  }
+}

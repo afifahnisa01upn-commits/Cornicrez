@@ -1,3 +1,5 @@
-# Rahasia dan data sementara: jangan ikut ke GitHub
-config.local.php
-data/
+# Rahasia dan file lokal: jangan ikut ke GitHub
+.env
+.env.*
+.vercel/
+node_modules/

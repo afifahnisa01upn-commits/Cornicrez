@@ -1,62 +1,56 @@
-CORNICREZ Inventory Monitoring (PHP + HTML + Supabase)
-========================================================
+CORNICREZ Inventory Monitoring (Vercel + Supabase)
+===================================================
 
-ISI FOLDER
-  index.php                 halaman dashboard
-  config.php                parameter stok dan interval (Safety Stock, ROP, interval simpan, dll.)
-  config.local.example.php  contoh isi RAHASIA: salin menjadi config.local.php lalu isi  <- EDIT INI
-  lib.php                   fungsi bersama (Supabase, data live, perhitungan)
-  database.sql              struktur tabel Supabase
-  api/simpan.php            dipanggil ESP32 tiap 3 detik (kirim berat)
-  api/manual.php            dipanggil dashboard (input manual + simulasi)
-  api/live.php              dipanggil dashboard tiap 3 detik (angka LIVE, dari server)
-  api/data.php              dipanggil dashboard saat ada data baru tersimpan (riwayat dari Supabase)
-  assets/                   style.css dan app.js
-  data/                     dibuat otomatis oleh server (angka live sementara). Jangan di-upload / di-commit.
-  esp32/timbangan_cornicrez/timbangan_cornicrez.ino   sketch ESP32-S3
+APLIKASI
+  public/index.html   dashboard statis (satu-satunya yang disajikan sebagai file biasa)
+  public/assets/      CSS dan JavaScript dashboard
+  api/                Vercel Functions: data, live, manual, simpan (alamat /api/NAMA)
+  server/lib.js       fungsi backend bersama (tidak menjadi endpoint)
+  vercel.json         pengaturan Vercel (folder output public, batas waktu fungsi)
+  package.json        versi Node.js untuk Vercel
+  database.sql        tabel, view, dan fungsi Supabase yang diperlukan
+  esp32/              sketch ESP32 (tidak ikut di-upload ke Vercel; lihat .vercelignore)
 
-ALUR DATA
-  ESP32-S3 --(WiFi, HTTPS, tiap 3 detik)--> api/simpan.php (di hosting)
-        |-- angka LIVE disimpan di file server (data/)  --> api/live.php --> dashboard (tiap 3 detik)
-        '-- tiap 1 menit: rata-rata pembacaan --> Supabase --> api/data.php --> grafik & tabel riwayat
-  Arduino IDE hanya dipakai untuk memprogram ESP32 (dan Serial Monitor untuk cek).
+DEPLOY KE VERCEL
+  1. Di Supabase, buka SQL Editor dan jalankan seluruh isi database.sql.
+     Jika tabel timbangan sudah ada, jalankan lagi file ini untuk menambahkan
+     tabel state dan fungsi pencatatan untuk Vercel.
+  2. Push folder proyek ke repository Git dan import repository itu di Vercel.
+  3. Buka server/config.js dan isi tiga nilai:
+       SUPABASE_URL   URL project Supabase (contoh https://xxxx.supabase.co)
+       SUPABASE_KEY   anon key / publishable key (Project Settings > API Keys)
+       API_KEY_ESP32  kata sandi acak minimal 16 karakter
+     Tidak perlu mengisi Environment Variables di Vercel. (Bila variabel dengan nama
+     yang sama diisi di Vercel, nilainya dipakai lebih dulu daripada config.js.)
+  4. Buka URL deployment Vercel. Uji form manual atau aktifkan Simulasi.
 
-  Jadi: angka di dashboard bergerak terus, tetapi Supabase hanya bertambah 1 baris per menit
-  (sekitar 1.440 baris per hari). Ubah INTERVAL_SIMPAN_DETIK di config.php bila ingin lain.
-  Input manual ("Hitung & Perbarui") dilakukan dengan sengaja, jadi langsung tersimpan.
+KIRIM DATA DARI ESP32
+  Arahkan request POST form-urlencoded ke:
+       https://NAMA-PROYEK.vercel.app/api/simpan
+  Field yang dikirim: key (sama dengan API_KEY_ESP32) dan berat (kg).
+  URL lama yang berakhiran /api/simpan.php harus diganti menjadi /api/simpan.
 
-LANGKAH PASANG
-  1. Supabase: buat project, buka SQL Editor, jalankan isi database.sql.
-  2. Supabase: Project Settings > API Keys > salin "Project URL" dan "Secret key" (sb_secret_...).
-  3. Salin config.local.example.php menjadi config.local.php, lalu isi SUPABASE_URL, SUPABASE_KEY,
-     dan ganti API_KEY_ESP32 dengan kata sandi buatanmu sendiri (huruf dan angka, minimal 16 karakter).
-  4. Upload semua file (kecuali folder esp32, README, dan data) ke hosting PHP
-     (butuh PHP 7.4+ dengan cURL). config.local.php ikut di-upload.
-     Folder tempat index.php berada harus boleh ditulis server, supaya folder data/ bisa dibuat.
-     Bila tidak bisa, buat sendiri folder bernama data lalu beri izin tulis (chmod 755 atau 775).
-  5. Buka alamat hosting. Coba isi "Input Berat" atau centang "Simulasi" untuk mengetes.
-  6. ESP32: buka sketch di folder esp32, isi WIFI_SSID, WIFI_PASS, URL_SIMPAN, API_KEY
-     (API_KEY harus sama dengan API_KEY_ESP32), lalu upload.
+KONFIGURASI STOK
+  Nilai awal (kapasitas 5 kg, Safety Stock 1 kg, ROP 2 kg, simpan tiap 60 detik)
+  ada di server/lib.js dan public/index.html. Jika mengubah parameter, samakan nilainya
+  di kedua file tersebut.
 
-TES LOKAL (opsional, tanpa hosting)
-  Jalankan di folder ini:  php -S 0.0.0.0:8080
-  Buka http://localhost:8080  (cURL harus aktif di PHP).
-  Untuk ESP32 di jaringan WiFi yang sama, pakai http://IP-PC:8080/api/simpan.php
-  dan ganti WiFiClientSecure di sketch dengan WiFiClient biasa.
+BATAS PAKET GRATIS (HOBBY)
+  ESP32 yang mengirim tiap 3 detik = sekitar 864.000 pemanggilan fungsi per bulan,
+  belum termasuk dashboard yang memanggil /api/live tiap 3 detik selama dibuka.
+  Bila mendekati batas, perbesar INTERVAL_KIRIM_MS di sketch (mis. 10000) dan
+  refreshMs di public/index.html. Cek batas terbaru di halaman Pricing Vercel.
 
 CATATAN
-  - Dashboard menunjukkan "Online" bila ESP32 mengirim data dalam 20 detik terakhir
-    (BATAS_OFFLINE_DETIK di config.php), selebihnya "Offline".
-  - Bila penyimpanan ke Supabase gagal, angka live tetap jalan dan dashboard menampilkan peringatan merah.
-    Pembacaan terus dikumpulkan dan disimpan setelah Supabase kembali normal.
-  - Bila hosting dipindah/di-deploy ulang dan folder data/ terhapus, dashboard otomatis memakai
-    data terakhir di Supabase sampai ESP32 mengirim lagi.
-
-CATATAN KEAMANAN
-  - Secret key Supabase hanya ada di config.local.php (server). Jangan dipasang di JavaScript atau sketch.
-  - config.local.php dan data/ sudah ada di .gitignore, jadi tidak ikut ke GitHub.
-    Sketch .ino berisi password WiFi dan API_KEY: jangan di-push ke GitHub setelah diisi.
-  - Tabel memakai RLS tanpa policy, jadi kunci publik Supabase tidak bisa membaca/menulis.
-  - Dashboard dan input manual terbuka untuk siapa pun yang tahu alamatnya.
-    Hanya kiriman dari ESP32 yang memakai kata sandi. Tambahkan login jika dashboard dipublikasikan luas.
-  - Hapus data simulasi:  delete from public.timbangan where sumber = 'simulasi';
+  - Vercel tidak menjalankan PHP sebagai aplikasi web biasa. Dashboard sekarang
+    memakai index.html dan endpoint JavaScript di api/.
+  - State live disimpan di Supabase, bukan filesystem Vercel yang sementara.
+  - server/config.js berisi anon key dan API_KEY_ESP32 dan ikut ke repository.
+    Anon key memang boleh publik, tetapi siapa pun yang memilikinya bisa membaca tabel dan
+    memanggil fungsi cornicrez_record_reading() (menambah data palsu) tanpa lewat
+    API_KEY_ESP32. Karena itu API_KEY_ESP32 di sini hanya penghalang ringan.
+    Pakai repository PRIVATE bila data ini penting. Jangan pernah mengisi SUPABASE_KEY
+    dengan secret / service_role key di file ini.
+  - Dashboard dan input manual terbuka bagi siapa pun yang mengetahui URL.
+    Proteksi login diperlukan sebelum dashboard dipublikasikan secara luas.
+  - Untuk menghapus data simulasi: delete from public.timbangan where sumber = 'simulasi';

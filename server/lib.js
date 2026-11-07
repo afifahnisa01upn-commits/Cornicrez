@@ -1,0 +1,163 @@
+const { timingSafeEqual } = require('node:crypto');
+const config = require('./config');
+
+const CONFIG = {
+  loadCell: 5,
+  kapasitas: 5,
+  safety: 1,
+  rop: 2,
+  refreshMs: 3000,
+  intervalSimpan: 60,
+  batasOffline: 20,
+  pemakaianDefault: 0.5
+};
+
+function send(res, status, data) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.status(status).json(data);
+}
+
+function requireMethod(req, res, method) {
+  if (req.method === method) return true;
+  send(res, 405, { ok: false, error: `Gunakan metode ${method}` });
+  return false;
+}
+
+// Nilai dibaca dari server/config.js; environment variable Vercel (bila ada) didahulukan.
+const PLACEHOLDER = /PROJECT-REF|GANTI_DENGAN|ganti-dengan/i;
+
+function environment() {
+  const url = process.env.SUPABASE_URL || config.SUPABASE_URL;
+  const key = process.env.SUPABASE_KEY || config.SUPABASE_KEY;
+  const esp32Key = process.env.API_KEY_ESP32 || config.API_KEY_ESP32;
+  if (![url, key, esp32Key].every((v) => v && !PLACEHOLDER.test(v))) {
+    throw new Error('SUPABASE_URL, SUPABASE_KEY, dan API_KEY_ESP32 belum diisi di server/config.js.');
+  }
+  return { url: url.replace(/\/+$/, ''), key, esp32Key };
+}
+
+async function supabase(path, options = {}) {
+  const env = environment();
+  const headers = {
+    apikey: env.key,
+    Accept: 'application/json',
+    ...(options.body === undefined ? {} : {
+      'Content-Type': 'application/json',
+      ...(options.prefer ? { Prefer: options.prefer } : {})
+    })
+  };
+  if (env.key.startsWith('eyJ')) headers.Authorization = `Bearer ${env.key}`;
+
+  let response;
+  try {
+    response = await fetch(`${env.url}/rest/v1/${path}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: AbortSignal.timeout(10000)
+    });
+  } catch (error) {
+    throw new Error(`Koneksi ke Supabase gagal: ${error.message}`);
+  }
+
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Supabase mengembalikan respons yang tidak valid (HTTP ${response.status}).`);
+    }
+  }
+  if (!response.ok) {
+    throw new Error(`Supabase menolak permintaan (HTTP ${response.status}): ${data?.message || response.statusText}`);
+  }
+  return data;
+}
+
+function validasiBerat(value, max = 100) {
+  if (value === null || value === undefined || typeof value === 'object') return null;
+  const normalized = String(value).trim().replace(',', '.');
+  if (!normalized || !Number.isFinite(Number(normalized))) return null;
+  const berat = Number(normalized);
+  if (berat > max) return null;
+  return Math.max(0, berat);
+}
+
+function statusStok(kg) {
+  if (kg <= CONFIG.safety) {
+    return {
+      kode: 'kritis',
+      label: 'KRITIS',
+      pesan: '✖ Persediaan berada di bawah atau sama dengan Safety Stock.',
+      detail: 'Segera lakukan pengadaan!'
+    };
+  }
+  if (kg <= CONFIG.rop) {
+    return {
+      kode: 'menipis',
+      label: 'MENIPIS',
+      pesan: '⚠ Persediaan sudah mencapai Reorder Point.',
+      detail: 'Saatnya melakukan pemesanan ulang.'
+    };
+  }
+  return {
+    kode: 'aman',
+    label: 'AMAN',
+    pesan: '✓ Persediaan berada di atas ROP.',
+    detail: 'Stok masih dalam kondisi aman.'
+  };
+}
+
+function hitung(kg, pemakaian) {
+  const sisa = Math.max(0, kg - CONFIG.safety);
+  const diAtasRop = kg > CONFIG.rop;
+  const hari = kg <= CONFIG.safety ? 0 : (pemakaian > 0 ? sisa / pemakaian : null);
+  return {
+    sisa_di_atas_safety: Number(sisa.toFixed(2)),
+    di_atas_rop: diAtasRop,
+    selisih_ke_rop: Number((diAtasRop ? kg - CONFIG.rop : 0).toFixed(2)),
+    kebutuhan_pengadaan: Number(Math.max(0, CONFIG.kapasitas - kg).toFixed(2)),
+    estimasi_hari: hari === null ? null : Number(hari.toFixed(1)),
+    pemakaian_per_hari: Number(pemakaian.toFixed(2)),
+    kapasitas_persen: Math.min(100, Math.max(0, Math.round(kg / CONFIG.kapasitas * 100)))
+  };
+}
+
+async function catatBerat(kg, sumber) {
+  const result = await supabase('rpc/cornicrez_record_reading', {
+    method: 'POST',
+    body: { p_berat_kg: Number(kg.toFixed(3)), p_sumber: sumber, p_interval: CONFIG.intervalSimpan }
+  });
+  if (!result || !result.state) throw new Error('Respons pencatatan dari Supabase tidak lengkap.');
+  return result;
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+function reportError(name, error, res) {
+  console.error(`CORNICREZ ${name}:`, error);
+  send(res, 502, {
+    ok: false,
+    error: 'Layanan Supabase gagal. Periksa server/config.js dan jalankan pembaruan database.sql.'
+  });
+}
+
+module.exports = {
+  CONFIG,
+  catatBerat,
+  environment,
+  hitung,
+  reportError,
+  requireMethod,
+  safeEqual,
+  send,
+  statusStok,
+  supabase,
+  validasiBerat
+};

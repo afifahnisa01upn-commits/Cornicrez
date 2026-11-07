@@ -245,7 +245,7 @@
     return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + '_=' + Date.now(), { cache: 'no-store' })
       .then(function (r) {
         return r.json().catch(function () {
-          throw new Error('Respons server bukan JSON. Periksa error PHP di hosting.');
+          throw new Error('Respons server bukan JSON. Periksa konfigurasi Vercel dan Supabase.');
         });
       })
       .then(function (d) {
@@ -262,7 +262,7 @@
   function muatLive() {
     if (sedangMuat) return;
     sedangMuat = true;
-    ambilJson('api/live.php')
+    ambilJson('/api/live')
       .then(function (d) {
         setGalat('live', '');
         setGalat('simpan', d.simpan && d.simpan.gagal ? d.simpan.gagal : '');
@@ -280,7 +280,7 @@
     if (sedangRiwayat || Date.now() < riwayatBoleh) return;
     sedangRiwayat = true;
     perluRiwayat = false;        // bila ada data baru selagi memuat, penanda ini menyala lagi
-    ambilJson('api/data.php')
+    ambilJson('/api/data')
       .then(function (d) {
         setGalat('riwayat', '');
         renderRiwayat(d.riwayat);
@@ -297,7 +297,7 @@
   /*  Input manual + simulasi                                     */
   /* ------------------------------------------------------------ */
   function kirimBerat(kg, sumber) {
-    return fetch('api/manual.php', {
+    return fetch('/api/manual', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ berat_kg: kg, sumber: sumber })
