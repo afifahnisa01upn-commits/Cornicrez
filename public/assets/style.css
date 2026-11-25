@@ -164,3 +164,12 @@ section{scroll-margin-top:16px}
   .stats,.res{grid-template-columns:1fr}
   .berat{font-size:56px}
 }
+main > section { display: none !important; }
+main > section.active { display: block !important; }
+
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 14px 0; }
+.form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600; color: #1b5e20; }
+.form-grid input { padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; font: inherit; background: #fff; }
+.formula-box { background: #fff8e1; border-left: 4px solid #f5a623; padding: 10px 14px; border-radius: 8px; margin-bottom: 8px; }
+#perhitungan .res { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 16px 0; }
+#o-warn:empty { display: none; }

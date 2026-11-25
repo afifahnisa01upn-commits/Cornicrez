@@ -2,6 +2,15 @@
   'use strict';
 
   var CFG = window.CFG;
+    // muat Safety Stock & ROP yang tersimpan dari kalkulator
+  try {
+    var tersimpan = JSON.parse(localStorage.getItem('cfg') || 'null');
+    if (tersimpan) {
+      if (typeof tersimpan.safety === 'number') CFG.safety = tersimpan.safety;
+      if (typeof tersimpan.rop === 'number') CFG.rop = tersimpan.rop;
+    }
+  } catch (e) {}
+  var terakhirLive = null, terakhirRiwayat = null;
   var WARNA = { aman: '#2e9c4f', menipis: '#f08a00', kritis: '#d93025' };
   var SUMBER = { esp32: 'ESP32', manual: 'Manual', simulasi: 'Simulasi' };
 
@@ -22,13 +31,48 @@
     if (isNaN(d)) return '-';
     return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', timeZone: 'Asia/Jakarta' });
   }
-  function kodeStatus(kg) {
+    function kodeStatus(kg) {
     return kg <= CFG.safety ? 'kritis' : (kg <= CFG.rop ? 'menipis' : 'aman');
   }
   // Pasang class dasar + kode status (aman = tanpa class tambahan)
   function kelas(el, dasar, kode) {
     el.className = dasar + (kode && kode !== 'aman' ? ' ' + kode : '');
   }
+
+  // Status dihitung di browser, batasnya dari CFG (hasil kalkulator ROP)
+  function statusBaru(kg) {
+    var kode = kodeStatus(kg);
+    if (kode === 'kritis') return {
+      kode: kode, label: 'KRITIS',
+      pesan: '🚨 Stok di bawah Safety Stock!',
+      detail: 'Stok ≤ ' + fmt(CFG.safety) + ' kg. Segera lakukan pengadaan.'
+    };
+    if (kode === 'menipis') return {
+      kode: kode, label: 'MENIPIS',
+      pesan: '⚠ Peringatan: Stok mencapai ROP!',
+      detail: 'Stok ≤ ' + fmt(CFG.rop) + ' kg. Perlu dilakukan pengadaan kembali.'
+    };
+    return {
+      kode: kode, label: 'AMAN',
+      pesan: 'Stok dalam kondisi aman.',
+      detail: 'Stok di atas Reorder Point (' + fmt(CFG.rop) + ' kg). Belum perlu pengadaan.'
+    };
+  }
+
+  function hitungBaru(kg, h) {
+    var sisa = Math.max(0, kg - CFG.safety);
+    var pakai = h.pemakaian_per_hari;
+    return {
+      sisa_di_atas_safety: sisa,
+      di_atas_rop: kg > CFG.rop,
+      selisih_ke_rop: kg - CFG.rop,
+      kebutuhan_pengadaan: Math.max(0, CFG.kapasitas - kg),
+      estimasi_hari: pakai > 0 ? sisa / pakai : null,
+      pemakaian_per_hari: pakai || 0,
+      kapasitas_persen: Math.round(Math.min(100, Math.max(0, kg / CFG.kapasitas * 100)))
+    };
+  }
+  
 
   /* ------------------------------------------------------------ */
   /*  Tampilan                                                    */
@@ -68,6 +112,7 @@
   }
 
   function renderLive(d) {
+    terakhirLive = d;
     var sys = d.sistem || { kode: 'kosong', label: 'Belum ada data' };
     $('sysVal').className = 'val sys sys-' + sys.kode;
     $('sysVal').textContent = sys.label;
@@ -92,7 +137,7 @@
       return;
     }
 
-    var kg = d.terbaru.berat_kg, st = d.status, h = d.hitung, kode = st.kode;
+    var kg = d.terbaru.berat_kg, st = statusBaru(kg), h = hitungBaru(kg, d.hitung || {}), kode = st.kode;
 
     // Sidebar
     kelas($('sideStock'), 'side-stock', kode);
@@ -125,12 +170,13 @@
   }
 
   function renderRiwayat(rows) {
+    terakhirRiwayat = rows;
     gambarGrafik(rows);
     isiTabel(rows);
   }
 
   function teksMonitoring(d) {
-    var h = d.hitung, st = d.status, p = d.param;
+    var st = statusBaru(d.terbaru.berat_kg), h = hitungBaru(d.terbaru.berat_kg, d.hitung || {}), p = CFG;
     function baris(label, nilai) { return (label + '                    ').slice(0, 21) + ': ' + nilai; }
     var t = [
       'HASIL MONITORING PERSEDIAAN (' + jam(d.terbaru.waktu) + ')',
@@ -336,19 +382,87 @@
     else { clearInterval(simTimer); simTimer = null; }
   });
 
+
   /* ------------------------------------------------------------ */
-  /*  Menu samping: tandai bagian yang sedang dilihat              */
+  /*  Menu samping: tampil bergantian                              */
   /* ------------------------------------------------------------ */
-  if ('IntersectionObserver' in window) {
-    var links = document.querySelectorAll('.nav a');
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (!en.isIntersecting) return;
-        links.forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-sec') === en.target.id); });
-      });
-    }, { rootMargin: '-30% 0px -60% 0px' });
-    ['dashboard', 'perhitungan', 'riwayat'].forEach(function (id) { io.observe($(id)); });
+  var navLinks = document.querySelectorAll('.nav a');
+  var sections = document.querySelectorAll('main > section');
+
+  function bukaMenu(id) {
+    if (!$(id)) id = 'dashboard';
+    sections.forEach(function (s) { s.classList.toggle('active', s.id === id); });
+    navLinks.forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-sec') === id); });
+    window.scrollTo(0, 0);
   }
+  navLinks.forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      history.pushState(null, '', '#' + a.getAttribute('data-sec'));
+      bukaMenu(a.getAttribute('data-sec'));
+    });
+  });
+  window.addEventListener('popstate', function () { bukaMenu(location.hash.slice(1)); });
+  bukaMenu(location.hash.slice(1) || 'dashboard');
+
+  /* ------------------------------------------------------------ */
+  /*  Kalkulator ROP:  ROP = (d × L) + SS                          */
+  /* ------------------------------------------------------------ */
+  function angka(id) { return parseFloat(String($(id).value).replace(',', '.')) || 0; }
+  var hasilROP = null;
+
+  function hitungROP() {
+    var d = angka('k-d'), L = angka('k-L'), ss = angka('k-ss');
+    var rop = d * L + ss;
+    hasilROP = { ss: ss, rop: rop, d: d, L: L };
+
+    $('o-ss').textContent = fmt(ss) + ' kg';
+    $('o-rop').textContent = fmt(rop) + ' kg';
+    $('o-langkah').textContent =
+      'ROP = (d × L) + SS\n' +
+      'ROP = (' + d + ' × ' + L + ') + ' + ss + '\n' +
+      'ROP = ' + fmt(d * L) + ' + ' + fmt(ss) + '\n' +
+      'ROP = ' + fmt(rop) + ' kg';
+
+    var w = '';
+    if (rop > CFG.kapasitas) w = '⚠ ROP (' + fmt(rop) + ' kg) lebih besar dari kapasitas ' + fmt(CFG.kapasitas) + ' kg.';
+    else if (rop <= ss) w = '⚠ ROP harus lebih besar dari Safety Stock. Isi permintaan (d) dan lead time (L) lebih dari 0.';
+    $('o-warn').textContent = w;
+  }
+
+  function tampilkanParameter() {
+    $('sSS').textContent = fmt(CFG.safety) + ' kg';
+    $('sROP').textContent = fmt(CFG.rop) + ' kg';
+    $('pMax').textContent = fmt(CFG.kapasitas) + ' kg';
+  }
+
+  ['k-d', 'k-L', 'k-ss'].forEach(function (id) { $(id).addEventListener('input', hitungROP); });
+
+  // isi form dengan nilai yang tersimpan, kalau ada
+  try {
+    var sv = JSON.parse(localStorage.getItem('cfg') || 'null');
+    if (sv && sv.d !== undefined) { $('k-d').value = sv.d; $('k-L').value = sv.L; $('k-ss').value = sv.safety; }
+    else { $('k-ss').value = CFG.safety; }
+  } catch (e) {}
+  hitungROP();
+  tampilkanParameter();
+
+  $('btn-apply').addEventListener('click', function () {
+    if (!hasilROP || hasilROP.rop <= hasilROP.ss) {
+      $('o-warn').textContent = '⚠ Perhitungan belum valid, ROP harus lebih besar dari Safety Stock.';
+      return;
+    }
+    CFG.safety = hasilROP.ss;
+    CFG.rop = hasilROP.rop;
+    try {
+      localStorage.setItem('cfg', JSON.stringify({ safety: CFG.safety, rop: CFG.rop, d: hasilROP.d, L: hasilROP.L }));
+    } catch (e) {}
+    tampilkanParameter();
+    if (terakhirLive) renderLive(terakhirLive);          // status langsung ikut batas baru
+    if (terakhirRiwayat) renderRiwayat(terakhirRiwayat); // zona di grafik ikut berubah
+    history.pushState(null, '', '#dashboard');
+    bukaMenu('dashboard');
+  });
 
   $('infoRiwayat').textContent = 'Data tersimpan di database, satu titik tiap ' + teksInterval(CFG.intervalSimpan) + ' (rata-rata pembacaan selama itu).';
   muatLive();

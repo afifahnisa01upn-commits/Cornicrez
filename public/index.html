@@ -29,7 +29,7 @@
     <span class="badge kosong" id="sideBadge">MEMUAT</span>
   </div>
 
-  <div class="side-foot">Load Cell + HX711 + ESP32</div>
+  <div class="side-foot">CV Insan Mandiri</div>
 </aside>
 
 <main class="main">
@@ -37,7 +37,7 @@
   <div id="alert" class="alert" hidden></div>
 
   <!-- ===================== DASHBOARD ===================== -->
-  <section id="dashboard">
+  <section id="dashboard" class="active">
     <header class="banner">
       <span class="corn l">🌽</span>
       <h1>Cornicrez Inventory Monitoring</h1>
@@ -47,15 +47,15 @@
 
     <div class="stats">
       <div class="stat">
-        <div><div class="lbl">Load Cell</div><div class="val">5 kg</div></div>
+        <div><div class="lbl">Load Cell</div><div class="val">10 kg</div></div>
         <div class="ico">⚖️</div>
       </div>
       <div class="stat red">
-        <div><div class="lbl">Safety Stock</div><div class="val">1.00 kg</div></div>
+        <div><div class="lbl">Safety Stock</div><div class="val" id="sSS">1.00 kg</div></div>
         <div class="ico">🛡️</div>
       </div>
       <div class="stat orange">
-        <div><div class="lbl">Reorder Point</div><div class="val">2.00 kg</div></div>
+        <div><div class="lbl">Reorder Point</div><div class="val" id="sROP">2.00 kg</div></div>
         <div class="ico">🔔</div>
       </div>
       <div class="stat yellow">
@@ -70,7 +70,7 @@
         <div class="berat" id="berat"><span id="beratAngka">–</span><small>kg</small></div>
         <div class="bar-head"><span>Kapasitas Penyimpanan</span><span id="persen">0%</span></div>
         <div class="bar" id="bar"><i id="barIsi"></i></div>
-        <div class="bar-foot"><span>0 kg</span><span>5 kg</span></div>
+        <div class="bar-foot"><span>0 kg</span><span>10 kg</span></div>
         <p class="live-info" id="infoLive"><span class="live-dot kosong"></span><span id="infoLiveTeks">Menunggu data…</span></p>
       </div>
 
@@ -85,12 +85,45 @@
 
   <!-- ===================== PERHITUNGAN ===================== -->
   <section id="perhitungan">
+
+    <div class="card">
+      <h2>🧮 Perhitungan Reorder Point (ROP)</h2>
+
+      <div class="formula-box">
+        <strong>Rumus:</strong> ROP = (d × L) + SS<br>
+        <small>d = permintaan rata-rata per hari, L = lead time, SS = safety stock</small>
+      </div>
+
+      <div class="form-grid">
+        <label>Permintaan rata-rata, d (kg/hari)
+          <input type="number" id="k-d" step="0.01" min="0" value="0.5">
+        </label>
+        <label>Lead time, L (hari)
+          <input type="number" id="k-L" step="0.1" min="0" value="2">
+        </label>
+        <label>Safety Stock, SS (kg)
+          <input type="number" id="k-ss" step="0.01" min="0" value="1">
+        </label>
+      </div>
+
+      <div class="res">
+        <div class="box r"><div class="t">Safety Stock</div><div class="v" id="o-ss">–</div></div>
+        <div class="box o"><div class="t">Reorder Point</div><div class="v" id="o-rop">–</div></div>
+        <div class="box g"><div class="t">Kapasitas Maksimum</div><div class="v" id="pMax">10.00 kg</div></div>
+      </div>
+
+      <pre class="mono" id="o-langkah"></pre>
+      <div class="note-err" id="o-warn"></div>
+
+      <button class="btn" id="btn-apply" type="button">✔ Terapkan ke Dashboard</button>
+    </div>
+
     <div class="card">
       <h2>✍️ Input Berat</h2>
       <form id="formBerat" class="input-row" autocomplete="off">
         <div class="field">
           <label for="inputBerat">Berat dari timbangan (kg)</label>
-          <input type="number" id="inputBerat" step="0.01" min="0" max="5" placeholder="contoh: 3.25">
+          <input type="number" id="inputBerat" step="0.01" min="0" max="10" placeholder="contoh: 3.25">
         </div>
         <button type="submit" class="btn" id="btnHitung">Hitung &amp; Perbarui</button>
         <label class="check"><input type="checkbox" id="chkSim"> Simulasi data Wokwi (tiap 3 detik)</label>
@@ -108,14 +141,6 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>📐 Parameter Persediaan <span class="deco">🌽</span></h2>
-      <div class="params">
-        <div class="box r"><div class="t">Safety Stock</div><div class="v">1.00 kg</div></div>
-        <div class="box o"><div class="t">Reorder Point</div><div class="v">2.00 kg</div></div>
-        <div class="box g"><div class="t">Kapasitas Maksimum</div><div class="v">5.00 kg</div></div>
-      </div>
-    </div>
   </section>
 
   <!-- ===================== RIWAYAT ===================== -->
@@ -145,7 +170,11 @@
 </main>
 
 <script>
-window.CFG = { loadCell: 5, kapasitas: 5, safety: 1, rop: 2, refreshMs: 3000, intervalSimpan: 60 };
+window.CFG = { loadCell: 5, kapasitas: 10, safety: 1, rop: 2, refreshMs: 3000, intervalSimpan: 60 };
+try {
+  const s = JSON.parse(localStorage.getItem('cfg') || 'null');
+  if (s) Object.assign(CFG, s);
+} catch (e) {}
 </script>
 <script src="assets/app.js"></script>
 </body>

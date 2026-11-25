@@ -19,7 +19,7 @@ create index if not exists timbangan_created_at_idx
 --    Menulis hanya lewat fungsi cornicrez_record_reading() yang memeriksa isian.
 alter table public.timbangan enable row level security;
 
--- 3. State live persisten. Vercel Functions tidak memiliki filesystem persisten.
+-- 3. State  persisten. Vercel Functions tidak memiliki filesystem persisten.
 create table if not exists public.cornicrez_state (
   id boolean primary key default true check (id),
   state jsonb not null default
@@ -75,6 +75,9 @@ declare
   v_first timestamptz;
   v_last timestamptz;
   v_hours numeric;
+  v_previous_kg numeric;
+  v_previous_status text;
+  v_current_status text;
 begin
   if p_sumber not in ('esp32', 'manual', 'simulasi') then
     raise exception 'Sumber data tidak valid';
@@ -92,7 +95,29 @@ begin
   for update;
 
   v_state := coalesce(v_state, '{"live":null,"jendela":null,"simpan":null,"gagal":null,"ulang":0,"pemakaian":null}'::jsonb);
-  v_state := jsonb_set(v_state, '{live}', jsonb_build_object(
+
+-- Mengambil berat sebelum data terbaru diperbarui.
+v_previous_kg := nullif(
+  v_state->'live'->>'berat_kg',
+  ''
+)::numeric;
+
+-- Menentukan status sebelumnya.
+v_previous_status := CASE
+  WHEN v_previous_kg IS NULL THEN NULL
+  WHEN v_previous_kg <= 1 THEN 'kritis'
+  WHEN v_previous_kg <= 2 THEN 'menipis'
+  ELSE 'aman'
+END;
+
+-- Menentukan status terbaru.
+v_current_status := CASE
+  WHEN p_berat_kg <= 1 THEN 'kritis'
+  WHEN p_berat_kg <= 2 THEN 'menipis'
+  ELSE 'aman'
+END;
+
+v_state := jsonb_set(v_state, '{live}', jsonb_build_object(
     'berat_kg', round(p_berat_kg, 3),
     'sumber', p_sumber,
     'waktu', v_now
@@ -185,10 +210,12 @@ begin
 
   update public.cornicrez_state set state = v_state where id = true;
   return jsonb_build_object(
-    'ok', true,
-    'tersimpan', v_saved,
-    'peringatan', v_warning,
-    'state', v_state
+  'ok', true,
+  'tersimpan', v_saved,
+  'peringatan', v_warning,
+  'status_sebelumnya', v_previous_status,
+  'status_sekarang', v_current_status,
+  'state', v_state
   );
 end;
 $$;

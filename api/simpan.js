@@ -8,11 +8,31 @@ const {
   validasiBerat
 } = require('../server/lib');
 
+
 function parseFormBody(req) {
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
-  const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body || '');
-  return Object.fromEntries(new URLSearchParams(raw));
+  if (
+    req.body &&
+    typeof req.body === 'object' &&
+    !Buffer.isBuffer(req.body)
+  ) {
+    return req.body;
+  }
+
+  const raw = Buffer.isBuffer(req.body)
+    ? req.body.toString('utf8')
+    : String(req.body || '');
+
+  if (!raw.trim()) return {};
+
+  // Mendukung JSON dari ESP32
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Mendukung URL-encoded form
+    return Object.fromEntries(new URLSearchParams(raw));
+  }
 }
+
 
 module.exports = async function handler(req, res) {
   if (!requireMethod(req, res, 'POST')) return;

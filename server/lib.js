@@ -1,5 +1,11 @@
 const { timingSafeEqual } = require('node:crypto');
 const config = require('./config');
+// KONFIGURASI EMAIL CORNICREZ
+const EMAIL_CONFIG = {
+  apiKey: '[REDACTED]',
+  from: 'onboarding@resend.dev',
+  to: 'cacornicrez@gmail.com'
+};
 
 const CONFIG = {
   loadCell: 5,
@@ -125,12 +131,143 @@ function hitung(kg, pemakaian) {
   };
 }
 
+async function kirimNotifikasiStok(
+  kg,
+  sumber,
+  statusSebelumnya,
+  statusSekarang
+) {
+  // Data simulasi tidak mengirim email.
+  if (sumber === 'simulasi') return;
+
+  // Email hanya dikirim jika status berubah menjadi MENIPIS atau KRITIS.
+  if (
+    !['menipis', 'kritis'].includes(statusSekarang) ||
+    statusSebelumnya === statusSekarang
+  ) {
+    return;
+  }
+
+  const label =
+    statusSekarang === 'kritis' ? 'KRITIS' : 'MENIPIS';
+
+  const pesan =
+    statusSekarang === 'kritis'
+      ? 'Persediaan telah mencapai atau berada di bawah Safety Stock. Segera lakukan pengadaan bahan baku.'
+      : 'Persediaan telah mencapai Reorder Point. Segera lakukan pemesanan ulang.';
+
+  const waktu = new Date().toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    dateStyle: 'full',
+    timeStyle: 'medium'
+  });
+
+  try {
+    if (
+      !EMAIL_CONFIG.apiKey ||
+      EMAIL_CONFIG.apiKey === '[REDACTED]'
+    ) {
+      throw new Error('[REDACTED]');
+    }
+
+    const response = await fetch(
+      'https://api.resend.com/emails',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${EMAIL_CONFIG.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: `CORNICREZ Monitoring <${EMAIL_CONFIG.from}>`,
+          to: [EMAIL_CONFIG.to],
+          subject: `[CORNICREZ] Peringatan Stok ${label}`,
+          html: `
+            <div style="font-family:Arial,sans-serif;color:#333;line-height:1.6">
+              <h2>Peringatan Persediaan CORNICREZ</h2>
+
+              <p>Sistem monitoring mendeteksi perubahan kondisi persediaan.</p>
+
+              <table style="border-collapse:collapse">
+                <tr>
+                  <td style="padding:8px"><b>Status</b></td>
+                  <td style="padding:8px">${label}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px"><b>Berat stok</b></td>
+                  <td style="padding:8px">${Number(kg).toFixed(3)} kg</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px"><b>Status sebelumnya</b></td>
+                  <td style="padding:8px">${statusSebelumnya || 'Belum tersedia'}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px"><b>Sumber data</b></td>
+                  <td style="padding:8px">${sumber}</td>
+                </tr>
+                <tr>
+                  <td style="padding:8px"><b>Waktu</b></td>
+                  <td style="padding:8px">${waktu}</td>
+                </tr>
+              </table>
+
+              <p>${pesan}</p>
+
+              <p>
+                Email ini dikirim secara otomatis oleh
+                sistem monitoring persediaan CORNICREZ.
+              </p>
+            </div>
+          `
+        }),
+        signal: AbortSignal.timeout(10000)
+      }
+    );
+
+    const hasil = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        hasil.message || `Resend HTTP ${response.status}`
+      );
+    }
+
+    console.log(
+      `CORNICREZ: Email ${label} berhasil dikirim. ID: ${hasil.id}`
+    );
+
+  } catch (error) {
+    // Kegagalan email tidak membatalkan pencatatan stok.
+    console.error(
+      'CORNICREZ: Gagal mengirim email:',
+      error.message
+    );
+  }
+}
+
 async function catatBerat(kg, sumber) {
   const result = await supabase('rpc/cornicrez_record_reading', {
     method: 'POST',
-    body: { p_berat_kg: Number(kg.toFixed(3)), p_sumber: sumber, p_interval: CONFIG.intervalSimpan }
+    body: {
+      p_berat_kg: Number(kg.toFixed(3)),
+      p_sumber: sumber,
+      p_interval: CONFIG.intervalSimpan
+    }
   });
-  if (!result || !result.state) throw new Error('Respons pencatatan dari Supabase tidak lengkap.');
+
+  if (!result || !result.state) {
+    throw new Error(
+      'Respons pencatatan dari Supabase tidak lengkap.'
+    );
+  }
+
+  await kirimNotifikasiStok(
+    kg,
+    sumber,
+    result.status_sebelumnya,
+    result.status_sekarang
+  );
+
   return result;
 }
 
