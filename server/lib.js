@@ -7,6 +7,7 @@ const EMAIL_CONFIG = {
   to: 'cacornicrez@gmail.com'
 };
 
+
 const CONFIG = {
   loadCell: 5,
   kapasitas: 5,
