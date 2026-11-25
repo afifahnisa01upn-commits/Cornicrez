@@ -2,10 +2,11 @@ const { timingSafeEqual } = require('node:crypto');
 const config = require('./config');
 // KONFIGURASI EMAIL CORNICREZ
 const EMAIL_CONFIG = {
-  apiKey: '[REDACTED]',
+  apiKey: process.env.RESEND_API_KEY || '',
   from: 'onboarding@resend.dev',
   to: 'cacornicrez@gmail.com'
 };
+
 
 
 const CONFIG = {
@@ -164,13 +165,9 @@ async function kirimNotifikasiStok(
   });
 
   try {
-    if (
-      !EMAIL_CONFIG.apiKey ||
-      EMAIL_CONFIG.apiKey === '[REDACTED]'
-    ) {
-      throw new Error('[REDACTED]');
+    if (!EMAIL_CONFIG.apiKey) {
+      throw new Error('RESEND_API_KEY belum diatur.');
     }
-
     const response = await fetch(
       'https://api.resend.com/emails',
       {
