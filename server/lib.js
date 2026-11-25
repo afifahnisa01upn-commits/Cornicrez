@@ -133,30 +133,35 @@ function hitung(kg, pemakaian) {
   };
 }
 
+
 async function kirimNotifikasiStok(
   kg,
   sumber,
   statusSebelumnya,
   statusSekarang
 ) {
+  const statusLama = String(statusSebelumnya || '').toLowerCase();
+  const statusBaru = String(statusSekarang || '').toLowerCase();
+
   // Data simulasi tidak mengirim email.
   if (sumber === 'simulasi') return;
 
   // Email hanya dikirim jika status berubah menjadi MENIPIS atau KRITIS.
   if (
-    !['menipis', 'kritis'].includes(statusSekarang) ||
-    statusSebelumnya === statusSekarang
+    !['menipis', 'kritis'].includes(statusBaru) ||
+    statusLama === statusBaru
   ) {
     return;
   }
 
   const label =
-    statusSekarang === 'kritis' ? 'KRITIS' : 'MENIPIS';
+    statusBaru === 'kritis' ? 'KRITIS' : 'MENIPIS';
 
   const pesan =
-    statusSekarang === 'kritis'
+    statusBaru === 'kritis'
       ? 'Persediaan telah mencapai atau berada di bawah Safety Stock. Segera lakukan pengadaan bahan baku.'
       : 'Persediaan telah mencapai Reorder Point. Segera lakukan pemesanan ulang.';
+
 
   const waktu = new Date().toLocaleString('id-ID', {
     timeZone: 'Asia/Jakarta',
