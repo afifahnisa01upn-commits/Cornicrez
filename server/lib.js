@@ -135,6 +135,7 @@ function hitung(kg, pemakaian) {
 
 
 async function kirimNotifikasiStok(
+  
   kg,
   sumber,
   statusSebelumnya,
@@ -142,7 +143,13 @@ async function kirimNotifikasiStok(
 ) {
   const statusLama = String(statusSebelumnya || '').toLowerCase();
   const statusBaru = String(statusSekarang || '').toLowerCase();
-
+console.log('DEBUG EMAIL:', {
+  sumber,
+  statusSebelumnya,
+  statusSekarang,
+  statusLama,
+  statusBaru
+});
   // Data simulasi tidak mengirim email.
   if (sumber === 'simulasi') return;
 
