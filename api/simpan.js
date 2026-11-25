@@ -38,11 +38,19 @@ module.exports = async function handler(req, res) {
   if (!requireMethod(req, res, 'POST')) return;
 
   try {
-    const env = environment();
-    const input = parseFormBody(req);
-    if (!safeEqual(input.key || '', env.esp32Key)) {
-      return send(res, 403, { ok: false, error: 'Kunci salah' });
-    }
+    
+const env = environment();
+const input = parseFormBody(req);
+
+console.log('DEBUG API KEY:', {
+  panjangDariESP32: String(input.key || '').length,
+  panjangDariVercel: String(env.esp32Key || '').length,
+  cocok: safeEqual(input.key || '', env.esp32Key)
+});
+
+if (!safeEqual(input.key || '', env.esp32Key)) {
+  return send(res, 403, { ok: false, error: 'Kunci salah' });
+}
 
     const berat = validasiBerat(input.berat);
     if (berat === null) {
